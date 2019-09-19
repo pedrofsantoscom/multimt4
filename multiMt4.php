@@ -496,7 +496,7 @@ class MultiMt4
                 $dom = new Dom;
                 $dom->loadFromFile($path.".html");
                 $table = $dom->find('table', 1)->find("tr");
-                $rows = [];
+                $rows = [ ["Pass", "Profit", "Total trades", "Profit factor", "Expected payoff", "Drawdown $", "Drawdown %", "OnTester result"] ];
                 foreach ($table as $key => $v)
                 {
                     if ($key === 0)
