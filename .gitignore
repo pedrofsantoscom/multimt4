@@ -1,5 +1,6 @@
 # Specify filepatterns you want git to ignore.
 
 _extra
-indicators-configs/*
+indicators-configs/*.json
 results/*
+config.json

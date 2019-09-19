@@ -158,7 +158,6 @@ function setIndicatorToRun($indicator, $toRun, $isRun)
 
     $oldname = $indicatorsFolder . $indicator . ($isRun ? ".run" : "") . ".json";
     $newname = $indicatorsFolder . $indicator . ($toRun ? ".run" : "") . ".json";
-    var_dump($indicator, $toRun, $isRun, $oldname, $newname); 
 
     return @rename($oldname, $newname);
 }
@@ -443,7 +442,7 @@ else if (isset($_GET["action"]))
                             <input type="hidden" name="action" value="save-<?php echo $action; ?>">
                             <span class="h5">
                                 <?php echo ucfirst($action); ?> 
-                                <?php if(isset($_GET["indicator"])): die();?>
+                                <?php if(isset($_GET["indicator"])): ?>
                                 <input type="hidden" name="indicator" value="<?php echo $_GET['indicator']; ?>">
                                 <small class="text-muted"><?php echo base64_decode($_GET["indicator"]); ?></small>
                                 <?php else: ?>
@@ -618,6 +617,7 @@ else if (isset($_GET["action"]))
         {
             var checked = e.currentTarget.checked;
             var tr = $(e.currentTarget).parents("tr");
+            tr.find("td").eq(2).find("input[type=text]").prop("disabled", checked);
             tr.find("td").eq(3).find("input[type=text]").prop("disabled", !checked);
             tr.find("td").eq(4).find("input[type=text]").prop("disabled", !checked);
             tr.find("td").eq(5).find("input[type=text]").prop("disabled", !checked);
