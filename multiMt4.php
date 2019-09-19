@@ -1,0 +1,801 @@
+<?php
+
+require "vendor/autoload.php";
+use PHPHtmlParser\Dom;
+
+function print_r2($a, $out=false)
+{
+    $outStr = "";
+    if ($out)
+    {
+        $outStr =  "<pre>" . print_r($a, true) . "</pre>";
+        return $outStr;
+    }
+
+    echo "<pre>";
+    echo print_r($a, true);
+    echo "</pre>";
+}
+
+/*
+"C:\\Program Files (x86)\\OANDA - MetaTrader",
+"C:\\Program Files (x86)\\OANDA - MetaTrader2",
+"C:\\Program Files (x86)\\OANDA - MetaTrader3",
+"C:\\Program Files (x86)\\OANDA - MetaTrader4",
+"C:\\Program Files (x86)\\OANDA - MetaTrader5"
+
+/*
+"Login" => "5135485",
+"Password" => "mt4-eur",
+"Server" => "OANDA-v20 Practice-1",
+*/
+
+class MultiMt4
+{
+    private static $backTesterIni =
+    [
+        // "; common settings 
+        "Login" => "",
+        "Password" => "",
+        "Server" => "",
+
+        //; experts settings 
+        "ExpertsEnable" => "true",
+        "ExpertsDllImport" => "true",
+        "ExpertsExpImport" => "true",
+        "ExpertsTrades" => "true",
+
+        //; start strategy tester 
+        "TestExpert" => "NNFX_Backtest",
+        "TestExpertParameters" => "NNFX_Backtest.ini",
+        "TestSymbol" => null,
+        "TestPeriod" => "D1",
+        "TestModel" => "2",
+        "TestSpread" => "0",
+        "TestOptimization" => "true",
+        "TestDateEnable" => "true",
+        "TestFromDate" => "2014.06.01",
+        "TestToDate" => "2019.06.01",
+        "TestReport" => null,
+        "TestReplaceReport" => "false",
+        "TestShutdownTerminal" => "true",
+    ];
+
+    private static $configTemplate =
+    [
+        "eaIniFile" => "tester\\ea.ini",
+        "workersLimit" => 1,
+        "backTesterIni" =>
+        [
+            "Login" => "12345",
+            "Password" => "67890",
+            "Server" => "broker server",
+            "TestFromDate" => "2014.06.01",
+            "TestToDate" => "2019.06.01",
+        ],
+        "mt4Paths" =>
+        [
+        ],
+        "workers" => 
+        [
+        ],
+    ];
+
+    private static $configPath = __DIR__."/config.json";
+    private static $config = [];
+    private static $user = "";
+    private static $startDateStr;
+
+    private static $resultsList = [];
+
+    // go!
+    public static function init()
+    {
+        echo "#################\n";
+        echo "#   MULTI MT4   #\n";
+        echo "#################\n\n";
+
+        // start date: 20190914033333
+        self::$startDateStr = (new DateTime())->format("YmdHis");
+
+        // get logged in user on windows
+        self::$user = trim(explode("\\", shell_exec("wmic computersystem get username"))[1]);
+
+        self::loadConfig();
+
+        self::loop();
+    }
+
+    // script loop
+    private static function loop()
+    {
+        $indicators = Indicator::factory(true);
+
+        if (count($indicators) === 0)
+        {
+            echo "There are 0 indicators to run or they already ran.";
+            die();
+        }
+
+        $indi = null;
+
+        // loop
+        while (true)
+        {
+            if ($indi === null)
+            {
+                if (count($indicators) === 0)
+                {
+                    while (!self::checkWorkersDone())
+                    {
+                        sleep(1);
+                    }
+
+                    self::convertResultsToCsv();
+                    echo "All tests done! Check 'results' folder.";
+                    die();
+                }
+
+                $indi = array_pop($indicators);
+            }
+
+            // check workers done, so we release threads and process their results
+            self::checkWorkersDone();
+
+            if (self::isMaxWorkersRunning())
+            {
+                sleep(1);
+                continue;
+            }
+
+            $pair = $indi->getNextPair();
+
+            if ($pair === null)
+            {
+                // indicator is done testing, move to the next one!
+                $indi = null;
+                continue;
+            }
+
+            $workerId = self::getAvailableWorkerId();
+
+            // all workers busy
+            if ($workerId === null)
+            {
+                // while we wait for available workers, process results to csv (if needed)
+                self::convertResultsToCsv();
+                sleep(1);
+                continue;
+            }
+
+            // start next tests
+            self::startWorker($indi, $workerId, $pair);
+        }
+    }
+
+    // set worker EA and backtester ini files and starts the worker
+    private static function startWorker(Indicator $indi, int $workerId)
+    {
+        $pair = $indi->getCurrentPair();
+        $indicatorName = $indi->getName();
+
+        self::checkTerminalAlreadyOpened($workerId);
+
+        self::setEASettings($workerId, $indi->getEaConfig());
+
+        self::setBackTesterSettings($workerId, $pair);
+
+        self::deleteTesterCacheFolder($workerId);
+
+        $worker = self::$config["workers"][$workerId];
+
+        $cmd = '"'.$worker["terminalPath"].'terminal.exe" "'.$worker["terminalConfig"].'"';
+        $pid = self::runBackgroundProcess($cmd, $workerId);
+        
+        if ($pid !== false)
+        {
+            self::$config["workers"][$workerId]["pid"] = $pid;
+            //$indi->addWorker($workerId);
+            echo "-> [Worker:$workerId][pid:$pid] Worker started: Indicator[".$indicatorName."], Pair[".$pair."]\n";
+        }
+        else
+        {
+            die();
+        }
+
+        sleep(1);
+    }
+
+    // total number of workers running
+    private static function isMaxWorkersRunning()
+    {
+        $ids = array_filter(array_column(self::$config["workers"], "pid"), function($a)
+        {
+            return $a !== null;
+        });
+        
+        return count($ids) >= self::$config["workersLimit"];
+    }
+
+    // grab an available worker
+    private static function getAvailableWorkerId()
+    {
+        $ids = array_filter(array_column(self::$config["workers"], "pid"), function($a)
+        {
+            return $a === null;
+        });
+        $ids = array_keys($ids);
+
+        if (count($ids) === 0)
+            return null;
+
+        return $ids[0];
+    }
+
+    // creates worker settings data struct
+    private static function setWorkerSettings(string $value)
+    {   
+        self::$config["workers"][] = 
+        [
+            "terminalPath" => $value,
+            "dataPath" => "C:\Users\\".self::$user."\AppData\Roaming\MetaQuotes\Terminal\\".self::getHashFolder($value)."\\",
+            "resultsPathTemplate" => "results\\[{INDICATOR}]_{PAIR}_{FROMDATE}_{TODATE}-".self::$startDateStr,
+            "lastResultPath" => null,
+            "pid" => null,
+        ];
+    }
+
+    // set ea settings: indicator name, inputs, indexes, etc
+    private static function setEASettings(int $workerId, array $newEaConfig)
+    {
+        $worker = self::$config["workers"][$workerId];
+
+        $eaIniData = file_get_contents($worker["dataPath"] . self::$config["eaIniFile"]);
+
+        if (!preg_match_all("/<(\w+)>/", $eaIniData, $matches))
+        {
+            echo "Failed to load EA ini file: '$eaIniPath'\n";
+            die();
+        }
+
+        // process format into php arrays
+        $settings = [];
+        foreach ($matches[1] as $key => $value)
+        {
+            // common, inputs, limits
+            $startTagPos = strpos($eaIniData, "<$value>");
+            if ($startTagPos === false)
+            {
+                echo "Failed to find <$value> tag on ini file: '$eaIniPath'\n";
+                die();
+            }
+
+            $endTagPos = strpos($eaIniData, "</$value>");
+            if ($endTagPos === false)
+            {
+                echo "Failed to find </$value> tag on ini file: '$eaIniPath'\n";
+                die();
+            }
+
+            //if (!isset($settings[$value]))
+            $settings[$value] = [];
+
+            $startTagPos += strlen("<$value>");
+            $endTagPos -= $startTagPos;
+
+            $tagData = substr($eaIniData, $startTagPos, $endTagPos);
+            $tagData = explode("\n", $tagData);
+
+            foreach ($tagData as $data)
+            {
+                if (strpos($data, "=") === false)
+                    continue;
+
+                $split = explode("=", $data);
+                $settings[$value][$split[0]] = trim($split[1]);
+
+                if (isset($newEaConfig[$value]) && isset($newEaConfig[$value][$split[0]]))
+                    $settings[$value][$split[0]] = trim($newEaConfig[$value][$split[0]]);
+            }
+
+        }
+        
+        // convert to text
+        $textToSave = "";
+        foreach ($settings as $key => $value)
+        {
+            $textToSave .= "<$key>\n";
+
+            foreach ($value as $k => $v)
+            {
+                $textToSave .= "$k=$v\n";
+            }
+
+            $textToSave .= "</$key>\n\n";
+        }
+
+        file_put_contents($eaIniPath, $textToSave);
+    }
+
+    // set mt4 backtester settings: EA, Pair, start and end date, optimization, etc
+    private static function setBackTesterSettings(int $workerId, string $pair)
+    {
+        $worker = &self::$config["workers"][$workerId];
+        $settings = self::$config["backTesterIni"];
+
+        foreach ($settings as $key => $value)
+        {
+            if (isset(self::$backTesterIni[$key]))
+            {
+                self::$backTesterIni[$key] = $value;
+            }
+        }
+
+        self::$backTesterIni["TestSymbol"] = strtoupper($pair);
+
+        $replaceTags =
+        [
+            "INDICATOR" => self::$indicatorName,
+            "PAIR" => $pair,
+            "FROMDATE" => $settings["TestFromDate"],
+            "TODATE" => $settings["TestToDate"],
+        ];
+
+        $worker["lastResultPath"] = $worker["resultsPathTemplate"];
+
+        foreach ($replaceTags as $key => $value)
+        {
+            $worker["lastResultPath"] = str_replace("{".$key."}", $value, $worker["lastResultPath"]);
+        }
+
+        // set result file name
+        $resultsFolder = $worker["dataPath"] . pathinfo($worker["resultsPathTemplate"], PATHINFO_DIRNAME);
+        if (!file_exists($resultsFolder))
+            mkdir($resultsFolder);
+
+        self::$backTesterIni["TestReport"] = $worker["lastResultPath"] . ".html";
+
+        // save config
+        $eaConfigData = [];
+        foreach (self::$backTesterIni as $key => $value)
+        {
+            $eaConfigData[] = $key . "=" .$value;
+        }
+        $eaConfigData = implode("\n", $eaConfigData);
+
+        $worker["terminalConfig"] = "terminal-NNFX_Backtest.ini";
+        file_put_contents($worker["terminalConfig"], $eaConfigData);
+    }
+
+    // deletes mt4 backtester cache files for each currency pair & dates candles
+    // from: https://stackoverflow.com/a/3349792
+    private static function deleteTesterCacheFolder(int $workerId)
+    {
+        $worker = self::$config["workers"][$workerId];
+
+        $dir = $worker["dataPath"] . "tester\\caches\\";
+        if (!file_exists($dir))
+            return;
+
+        $it = new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS);
+        $files = new RecursiveIteratorIterator($it,
+                     RecursiveIteratorIterator::CHILD_FIRST);
+        foreach($files as $file) {
+            if ($file->isDir()){
+                rmdir($file->getRealPath());
+            } else {
+                unlink($file->getRealPath());
+            }
+        }
+        rmdir($dir);
+    }
+
+    // close mt4 that is already opened and is going to be started next
+    private static function checkTerminalAlreadyOpened(int $workerId)
+    {
+        // check if theres a terminal opened for this worker
+
+        $worker = self::$config["workers"][$workerId];
+
+        $wmi = new \COM('winmgmts://');
+        $processes = $wmi->ExecQuery('SELECT ExecutablePath, ProcessId FROM Win32_Process WHERE Name = "terminal.exe"');
+
+        $list = [];
+        if ($processes)
+        { 
+            foreach ($processes as $a)
+            {
+                $list[] = 
+                [
+                    "path" => $a->ExecutablePath,
+                    "pid" => $a->ProcessId,
+                ];
+            }
+        }
+
+        foreach ($list as $key => $value)
+        {
+            if ($worker["terminalPath"] . "terminal.exe" === $value["path"])
+            {
+                shell_exec("taskkill /F /PID ".$value["pid"]);
+                sleep(1);
+                break;
+            }
+        }
+    }
+
+    // check if workers pids dont exist = worker finished
+    private static function checkWorkersDone()
+    {
+        $allDone = true;
+        foreach (self::$config["workers"] as $key => $value)
+        {
+            if ($value["pid"] !== null)
+            {
+                if ($value["lastResultPath"] !== null && !self::pidExists($value["pid"]))
+                {
+                    $allDone &= true;
+                    self::$config["workers"][$key]["pid"] = null;
+
+                    if (file_exists($value["dataPath"] . $value["lastResultPath"] . ".html"))
+                    {
+                        self::$resultsList[] = $value["dataPath"] . $value["lastResultPath"];
+                    }
+                    else
+                    {
+                        echo "[Worker:$key] Couldn't find report file on '".$value["dataPath"] . $value["lastResultPath"] . ".html"."'\n";
+                    }
+                }
+                else
+                {
+                    $allDone &= false;
+                }
+            }
+        }
+
+        return $allDone;
+    }
+
+    // process the reports into csv and copy all files to \results\ folder
+    public static function convertResultsToCsv()
+    {
+        // format: 1731;70.33;20;1.56;3.52;99.13;0.98%;73.68421053;Input1=18 ;Input2=21 ;Input3=10;ATRPeriod=14 ;Slippage=3 ;RiskPercent=2 ;TakeProfitPercent=100 ;StopLossPercent=150 ;ReopenOnOppositeSignal=1 ;OptimizationCalcType=0 ;IndicatorType=1 ;IndicatorIndex1=0 ;IndicatorIndex2=1 ;Input4=0 ;Input5=0 ;Input6=0 ;Input7=0 ;Input8=0
+
+        $resultsFolder = __DIR__ . "\\results\\";
+        if (!file_exists($resultsFolder))
+            mkdir($resultsFolder);
+
+        foreach (self::$resultsList as $key => $result)
+        {
+            try
+            {
+                // convert html to csv
+                $dom = new Dom;
+                $dom->loadFromFile($result.".html");
+                $table = $dom->find('table', 1)->find("tr");
+                $rows = [];
+                foreach ($table as $key => $value)
+                {
+                    if ($key === 0)
+                        continue;
+
+                    $tds = $value->find("td");
+
+                    $row = "";
+                    $row .= $tds[0]->text .";";
+                    $row .= $tds[1]->text .";";
+                    $row .= $tds[2]->text .";";
+                    $row .= $tds[3]->text .";";
+                    $row .= $tds[4]->text .";";
+                    $row .= $tds[5]->text .";";
+                    $row .= $tds[6]->text ."%;";
+                    $row .= $tds[7]->text .";";
+                    $row .= rtrim( str_replace( "; ", " ;", $tds[0]->getAttribute("title") ), "; ");
+                    
+                    $rows[] = $row;
+                }
+
+                $csv = implode("\n", $rows);
+
+                // save to csv
+                file_put_contents($result.".csv", $csv);
+
+                // move .htm and .csv files 
+                $path = $resultsFolder . array_reverse(explode("\\", $result))[0];
+
+                copy($result.".gif", $path.".gif");
+                copy($result.".html", $path.".html");
+                copy($result.".csv", $path.".csv");
+
+                unset(self::$resultsList[$key]);
+            }
+            catch (\Exception $e)
+            {
+                echo print_r2($e, true);
+            }
+        }
+    }
+
+    // opens mt4 terminal.exe as a background process so php can continue 
+    // and doesnt need to wait for the oppened process to finish
+    private static function runBackgroundProcess(string $command, $workerId)
+    {
+        $descriptorspec = array(
+            1 => array("pipe", "r"), // stdout
+            2 => array("pipe", "r") // stderr is a file to write to
+        );
+
+        $process = proc_open('start "" /B /MIN '.$command, $descriptorspec, $pipes, null, null);
+
+        if (is_resource($process)) 
+        {
+            $ppid = proc_get_status($process)['pid'];
+
+            $output = array_filter(explode(" ", shell_exec("wmic process get parentprocessid,processid | find \"$ppid\"")));
+            array_pop($output);
+            $pid = end($output);
+
+            // $pipes now looks like this:
+            // 0 => writeable handle connected to child stdin
+            // 1 => readable handle connected to child stdout
+            // 2 => readable handle connected to child stderr
+
+            $stdout = stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+            $stderr = stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+
+            // It is important that you close any pipes before calling
+            // proc_close in order to avoid a deadlock
+            $return_value = proc_close($process);
+
+            if ($return_value === 0)
+            {
+                //echo "\nBackground process started!\n";
+                return $pid;
+            }
+            else
+            {
+                echo "Worker $workerId FAILED to start!\n";
+                echo "STDOUT: '$stdout'\n";
+                echo "STDERR: '$stderr'\n";
+                return false;
+            }
+        }
+        else
+        {
+            echo "Worker $workerId NOT started!";
+            return false;
+        }
+
+        return false;
+    }
+
+    // generates the data folder unique hash, based on the mt4 instalation path
+    private static function getHashFolder($s)
+    {
+        $s = rtrim($s, "\\");
+        $r = mb_convert_encoding(strtoupper($s), "UTF-16LE");
+        $result = strtoupper(md5($r));
+
+        return $result;
+    }
+
+    // loads config.json file
+    private static function loadConfig(bool $reset = false)
+    {
+        if (!file_exists(self::$configPath) || $reset)
+        {
+            self::$config = self::$configTemplate;
+
+            echo "\nConfig file generated (config.json). Please change the following items and then re-run this program:\n- 'mt4Paths': add all mt4 folders paths;\n- 'pairsToTest': set true to test the pair;\n- 'terminalIni': set Login, Password, Server, TestFromDate, TestToDate\n";
+            die();
+        }
+
+        self::$config = json_decode(file_get_contents(self::$configPath), true);
+
+        if (count(self::$config["mt4Paths"]) === 0 && count(self::$config["workers"]) === 0)
+        {
+            echo "There's no 'mt4Paths' lines on config file!\n";
+            die();
+        }
+
+        // check if workers are valid and if they were running, check if they are done
+        foreach (self::$config["workers"] as $key => $value)
+        {
+            $f = $value["terminalPath"];
+
+            if (!in_array([strlen($f) - 1], ["\\", "//"]))
+                $f .= "\\";
+
+            if (!file_exists($f) || !file_exists($f."terminal.exe"))
+            {
+                unset(self::$config["workers"][$key]);
+                echo "Mt4 not found at '$value', item removed from config\n";
+                continue;
+            }
+
+            if (!self::pidExists($value["pid"]))
+                self::$config["workers"][$key]["pid"] = null;
+        }
+
+        $terminalPathList = array_column(self::$config, "terminalPath");
+        // check if terminal path exists
+        foreach (self::$config["mt4Paths"] as $key => $value)
+        {
+            $f = $value;
+
+            if (!in_array([strlen($f) - 1], ["\\", "//"]))
+                $f .= "\\";
+
+            if (!file_exists($f) || !file_exists($f."terminal.exe"))
+            {
+                unset(self::$config["mt4Paths"][$key]);
+                echo "Mt4 not found at '$value', item removed from config\n";
+                continue;
+            }
+
+            unset(self::$config["mt4Paths"][$key]);
+            if (in_array($f, $terminalPathList))
+                continue;
+
+            self::setWorkerSettings($f);
+            $terminalPathList = array_column(self::$config, "terminalPath");
+        }
+    }
+
+    // save in memory config to file
+    private static function saveConfig()
+    {
+        file_put_contents(self::$configPath, json_encode(self::$config, JSON_PRETTY_PRINT));
+    }
+
+    // check if a process id exists or not
+    private static function pidExists(int $pid = null, int $tries = 1)
+    {
+        if ($pid == null || $tries > 3)
+            return false;
+
+        try
+        {
+            exec('TASKLIST /NH /FO "CSV" /FI "PID eq '.$pid.'" /FI "IMAGENAME eq php.exe"', $outputA );
+            if (!isset($outputA) || count($outputA) === 0)
+                return false;
+
+            $outputB = explode( '","', $outputA[0] );
+            if (isset($outputB[1]))
+                return true;
+            return false;
+        }
+        catch (\Exception $e)
+        {
+            return self::pidExists($pid, ++$tries);
+        }
+    }
+}
+
+class Indicator
+{
+    private static $indicatorsFolder = __DIR__ . "/indicators-configs/";
+
+    private $configPath = "";
+    private $config = null;
+    //private $workerId = null;
+    private $currentPair = null;
+    private $run = false;
+
+    public static function factory(bool $run = null)
+    {
+        $instances = [];
+        $configsPaths = self::listConfigs($run);
+
+        foreach ($configsPaths as $key => $value)
+        {
+            $instances[] = new Indicator($value["name"], $value["run"]);
+        }
+
+        return $instances;
+    }
+
+    // filter indicators configs: true = run, false = dont run, null = all
+    private static function listConfigs(bool $filterRun = null)
+    {
+        $indicatorsFolder = self::$indicatorsFolder;
+        if (!file_exists($indicatorsFolder))
+            mkdir($indicatorsFolder);
+
+        $it = new RecursiveDirectoryIterator($indicatorsFolder, RecursiveDirectoryIterator::SKIP_DOTS);
+        $files = new RecursiveIteratorIterator($it, RecursiveIteratorIterator::CHILD_FIRST);
+        $list = [];
+        foreach($files as $file)
+        {
+            $pa = pathinfo($file->getFilename());
+            if (!isset($pa["extension"]) || $pa["extension"] !== "json")
+                continue;
+
+            $run = false;
+            if (substr($pa["filename"], -strlen(".run")) === ".run")
+            {
+                $run = true;
+                $pa["filename"] = str_replace(".run", "", $pa["filename"]);
+            }
+
+            if ($filterRun === null || ($filterRun === true && $run) || ($filterRun === false && !$run))
+                $list[] = [ "name" => $pa["filename"], "run" => $run ];
+        }
+
+        return $list;
+    }
+
+    //****************************************
+
+    public function __construct(string $configPath, bool $run)
+    {
+        $this->configPath = $configPath;
+        $this->run = $run;
+    }
+
+    public function getEaConfig()
+    {
+        return $this->config["eaIni"];
+    }
+
+    // loads config.json file
+    private function loadConfig()
+    {
+        if ($this->config !== null)
+            return false;
+
+        $this->config = json_decode(file_get_contents(self::$indicatorsFolder . $this->configPath . ($this->run ? ".run" : "") . ".json"), true);
+
+        return true;
+    }
+
+    // grab the next pair to be tested
+    public function getNextPair()
+    {
+        $configLoaded = $this->loadConfig();
+        $pairsToTest = &$this->config["pairsToTest"];
+
+        if (count($this->config["pairsToTest"]) === 0)
+            return null;
+
+        if ($configLoaded)
+        {
+            $pairsToTest = array_filter($pairsToTest);
+            $pairsToTest = array_keys($pairsToTest);
+        }
+
+        $result = array_pop($pairsToTest);
+
+        $this->currentPair = $result;
+
+        return $result;
+    }
+
+    public function getCurrentPair()
+    {
+        return $this->currentPair;
+    }
+
+    public function getName()
+    {
+        $this->config["eaIni"]["inputs"]["IndicatorPath"];
+    }
+
+    /*
+    public function addWorker(int $id)
+    {
+        $this->workerIds[] = $id;
+    }
+
+    public function removeWorker(int $id)
+    {
+        if (($key = array_search($id, $this->workerIds)) !== false)
+            unset($this->workerIds[$key]);
+    }
+    */
+}
+
+if (php_sapi_name() === "cli")
+    MultiMt4::init();
