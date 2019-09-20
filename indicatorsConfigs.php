@@ -521,7 +521,8 @@ else if (isset($_GET["action"]))
                                                 <td colspan="<?php echo $alone ? '4' :''; ?>">
                                                     <input class="form-control" type="text"
                                                         value="<?php echo htmlentities($value["variable"]["value"]); ?>" 
-                                                        name="eaIni[inputs][<?php echo htmlentities($value["variable"]["name"]); ?>]">
+                                                        name="eaIni[inputs][<?php echo htmlentities($value["variable"]["name"]); ?>]"
+                                                        <?php echo !$alone && $value["optimization"]["value"] === '1' ? 'disabled' : ''; ?>>
                                                 </td>
                                                 <?php if (!$alone): ?>
                                                 <td>
@@ -620,14 +621,6 @@ else if (isset($_GET["action"]))
             ],
             "dom": "Blfrtpi",
         });
-
-        /*
-        <?php foreach ($indicatorsList as $key => $value): ?>
-        <?php if ($value["run"]): ?>
-            table.row(<?php echo $key; ?>).select();
-        <?php endif; ?>
-        <?php endforeach; ?>
-        */
 
         $(".bigger-checkbox").on("click", function(e)
         {
