@@ -212,12 +212,14 @@ if (isset($_POST["action"]))
     
     if ($action === "save-edit")
     {
-        $indicatorData = getIndicator($indicator, $indicatorsList);
-
         $oldIndicator = $_POST["old-indicator"];
-        $toRun = $_POST["run"] === "1" ? true : false;
+        unset($_POST["old-indicator"]);
+        $toRun = isset($_POST["run"]) ? true : false;
         unset($_POST["run"]);
-        $config = loadConfig($indicator, $indicatorData["run"]);
+
+        $indicatorData = getIndicator($oldIndicator, $indicatorsList);
+
+        $config = loadConfig($oldIndicator, $indicatorData["run"]);
         $updated = updateConfigValues($config, $_POST);
         saveConfig($indicator, $updated, $indicatorData["run"]);
         deleteConfig($oldIndicator, $indicatorData["run"]);
@@ -241,7 +243,7 @@ if (isset($_POST["action"]))
         }
         else
         {
-            $toRun = $_POST["run"] === "1" ? true : false;
+            $toRun = isset($_POST["run"]) ? true : false;
             unset($_POST["run"]);
 
             // new indicator
