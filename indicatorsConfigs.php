@@ -221,8 +221,8 @@ if (isset($_POST["action"]))
 
         $config = loadConfig($oldIndicator, $indicatorData["run"]);
         $updated = updateConfigValues($config, $_POST);
-        saveConfig($indicator, $updated, $indicatorData["run"]);
         deleteConfig($oldIndicator, $indicatorData["run"]);
+        saveConfig($indicator, $updated, $indicatorData["run"]);
 
         setIndicatorToRun($indicator, $toRun, $indicatorData["run"]);
 
