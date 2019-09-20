@@ -22,19 +22,6 @@ function pt(string $s)
     echo "[" . (new DateTime())->format("Y-m-d H:i:s") . "] ".$s."\n";
 }
 
-/*
-"C:\\Program Files (x86)\\OANDA - MetaTrader",
-"C:\\Program Files (x86)\\OANDA - MetaTrader2",
-"C:\\Program Files (x86)\\OANDA - MetaTrader3",
-"C:\\Program Files (x86)\\OANDA - MetaTrader4",
-"C:\\Program Files (x86)\\OANDA - MetaTrader5"
-
-/*
-"Login" => "5135485",
-"Password" => "mt4-eur",
-"Server" => "OANDA-v20 Practice-1",
-*/
-
 class MultiMt4
 {
     private static $backTesterIni =
@@ -68,7 +55,7 @@ class MultiMt4
 
     private static $configTemplate =
     [
-        "eaIniFile" => "tester\\ea.ini",
+        "eaIniFile" => "ea.ini",
         "workersLimit" => 1,
         "backTesterIni" =>
         [
@@ -264,7 +251,7 @@ class MultiMt4
     {
         $worker = &self::$config["workers"][$workerId];
 
-        $eaIniPath = $worker["dataPath"] . self::$config["eaIniFile"];
+        $eaIniPath = $worker["dataPath"] . "tester\\" . self::$config["eaIniFile"];
         $eaIniData = file_get_contents($eaIniPath);
 
         if (!preg_match_all("/<(\w+)>/", $eaIniData, $matches))
