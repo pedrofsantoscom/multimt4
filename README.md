@@ -29,8 +29,8 @@ Manages multiple MetaTrader 4 copies to run MT4 backtester tests at the same tim
     ```json
     "mt4Paths": 
     [
-      "C:\\Program Files (x86)\\MetaTrader2\\\\", 
-      "C:\\Program Files (x86)\\MetaTrader3\\\\"
+      "C:\\Program Files (x86)\\MetaTrader2\\", 
+      "C:\\Program Files (x86)\\MetaTrader3\\"
     ],
     ```
   - 
