@@ -1,5 +1,6 @@
 # Multi Mt4
 Manages multiple MetaTrader 4 copies to run MT4 backtester tests at the same time, via EA settings for each indicator.
+![](https://github.com/pedrofsantoscom/multi-mt4/raw/master/running.png)
 
 ## Requirements
 - Windows 10
