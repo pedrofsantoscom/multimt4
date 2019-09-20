@@ -212,14 +212,15 @@ if (isset($_POST["action"]))
     
     if ($action === "save-edit")
     {
-        $indicator = base64_decode($indicator);
         $indicatorData = getIndicator($indicator, $indicatorsList);
 
+        $oldIndicator = $_POST["old-indicator"];
         $toRun = $_POST["run"] === "1" ? true : false;
         unset($_POST["run"]);
         $config = loadConfig($indicator, $indicatorData["run"]);
         $updated = updateConfigValues($config, $_POST);
         saveConfig($indicator, $updated, $indicatorData["run"]);
+        deleteConfig($oldIndicator, $indicatorData["run"]);
 
         setIndicatorToRun($indicator, $toRun, $indicatorData["run"]);
 
@@ -293,7 +294,19 @@ else if (isset($_GET["action"]))
     }
     else if ($action === "new")
     {
-        $config = loadDefaultConfig();
+        if (isset($indicator))
+        {
+            $indicatorData = getIndicator($indicator, $indicatorsList);
+
+            $config = loadConfig($indicator, $indicatorData["run"]);
+            $config["run"] = $indicatorData["run"];
+            $indicator = "DUPLICATE " . $indicator;
+        }
+        else
+        {
+            $config = loadDefaultConfig();
+        }
+
         $eaIni = convertEaSettingsToTable($config);
         $pairs = $config["pairsToTest"];
     }
@@ -402,7 +415,7 @@ else if (isset($_GET["action"]))
                                         <th class="bg-light" style="width: 20px;"></th>
                                         <th class="bg-light" style="width: 10px;">Run</th>
                                         <th class="bg-light">Indicator name</th>
-                                        <th class="bg-light" style="width: 100px;">Actions</th>
+                                        <th class="bg-light" style="width: 170px;">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -423,8 +436,11 @@ else if (isset($_GET["action"]))
                                             <?php echo $value["name"]; ?>
                                         </td>
                                         <td class="align-middle text-center">
-                                            <a class="btn btn-warning btn-sm" href="#" onclick="window.location='?action=edit&indicator=<?php echo base64_encode($value["name"]); ?>'">
+                                            <a class="btn btn-warning btn-sm" href="#" onclick="window.location='?action=edit&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
                                                 Edit
+                                            </a>
+                                            <a class="btn btn-info btn-sm" href="#" onclick="window.location='?action=new&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
+                                                Duplicate
                                             </a>
                                             <a class="btn btn-danger btn-sm" href="#" onclick="return deleteIndicator('<?php echo base64_encode($value["name"]); ?>')">
                                                 Delete
@@ -442,15 +458,13 @@ else if (isset($_GET["action"]))
                             <input type="hidden" name="action" value="save-<?php echo $action; ?>">
                             <span class="h5">
                                 <?php echo ucfirst($action); ?> 
-                                <?php if(isset($_GET["indicator"])): ?>
-                                <input type="hidden" name="indicator" value="<?php echo $_GET['indicator']; ?>">
-                                <small class="text-muted"><?php echo base64_decode($_GET["indicator"]); ?></small>
-                                <?php else: ?>
-                                <span >
+                                <?php if ($action === "edit"): ?>
+                                <input type="hidden" name="old-indicator" value="<?php echo htmlentities($indicator); ?>">
+                                <?php endif; ?>
+                                <span>
                                     <input style="width:300px"  type="text" class="form-control form-control-sm d-inline-block" 
                                         name="indicator" placeholder="Indicator name" value="<?php echo htmlentities($indicator); ?>" required>
                                 </span>
-                                <?php endif;?>
                                 &nbsp;
                                 <div class="form-check form-check-inline h6">
                                     <input class="form-check-input" type="checkbox" <?php echo $action === "edit" ? ($config["run"] ? "checked" : "") : ""; ?> id="run-<?php echo $action; ?>" name="run" value="1">
