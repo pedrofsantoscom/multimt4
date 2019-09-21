@@ -81,6 +81,10 @@ class MultiMt4
     private static $resultsList = [];
     private static $resultsPathTemplate = "results\\[{INDICATOR}]_{PAIR}_{FROMDATE}_{TODATE}-{STARTDATE}";
 
+    private static $indisAlreadyRun = [];
+
+    private static $firstStart = true;
+
     // go!
     public static function init()
     {
@@ -111,11 +115,18 @@ class MultiMt4
 
         $indi = null;
 
+        foreach (self::$config["workers"] as $key => $value)
+        {
+            self::checkTerminalAlreadyOpened($key);
+        }
+
         // loop
         while (true)
         {
             if ($indi === null)
             {
+                self::checkNewConfigsToRun($indicators);
+
                 if (count($indicators) === 0)
                 {
                     while (!self::checkWorkersDone())
@@ -138,6 +149,7 @@ class MultiMt4
 
             if (self::isMaxWorkersRunning())
             {
+                self::convertResultsToCsv(1);
                 sleep(1);
                 continue;
             }
@@ -148,6 +160,7 @@ class MultiMt4
             {
                 // indicator is done testing, move to the next one!
                 $indi->setRun(false);
+                self::$indisAlreadyRun[] = $indi->getName();
                 $indi = null;
                 continue;
             }
@@ -158,7 +171,7 @@ class MultiMt4
             if ($workerId === null)
             {
                 // while we wait for available workers, process results to csv (if needed)
-                self::convertResultsToCsv();
+                self::convertResultsToCsv(1);
                 sleep(1);
                 continue;
             }
@@ -174,8 +187,6 @@ class MultiMt4
         $pair = $indi->getCurrentPair();
         $indicatorName = $indi->getName();
 
-        self::checkTerminalAlreadyOpened($workerId);
-
         self::setEASettings($workerId, $indi->getEaConfig());
 
         self::setBackTesterSettings($indi, $workerId);
@@ -190,6 +201,7 @@ class MultiMt4
         if ($pid !== false)
         {
             self::$config["workers"][$workerId]["pid"] = $pid;
+
             self::saveConfig();
             //$indi->addWorker($workerId);
             pt("[Worker:$workerId][pid:$pid] Worker started: Indicator[".$indicatorName."], Pair[".$pair."]");
@@ -243,6 +255,7 @@ class MultiMt4
             "terminalPath" => $value,
             "dataPath" => "C:\Users\\".self::$user."\AppData\Roaming\MetaQuotes\Terminal\\".self::getHashFolder($value)."\\",
             "pid" => null,
+            "lastResultPath" => null,
         ];
     }
 
@@ -359,11 +372,17 @@ class MultiMt4
             mkdir($resultsFolder);
 
         self::$backTesterIni["TestReport"] = $lastResultPath . ".html";
-        self::$resultsList[] = 
+        $worker["lastResultPath"] = $worker["dataPath"] . $lastResultPath;
+        /*
+        $result = 
         [
             "path" => $worker["dataPath"] . $lastResultPath,
-            "workerId" => $workerId
+            "workerId" => $workerId,
+            "pid" => null,
         ];
+        self::$resultsList[] = $result;
+        */
+        //pt("[Worker:$workerId] Result added to list: ".print_r2($result, true));
 
         // save config
         $eaConfigData = [];
@@ -425,7 +444,9 @@ class MultiMt4
 
         foreach ($list as $key => $value)
         {
-            if ($worker["terminalPath"] . "terminal.exe" === $value["path"])
+            $path = $worker["terminalPath"] . "terminal.exe";
+
+            if ($path === $value["path"])
             {
                 shell_exec("taskkill /F /PID ".$value["pid"]);
                 sleep(1);
@@ -447,6 +468,9 @@ class MultiMt4
                     $allDone &= true;
                     pt("[Worker:$key][pid:".$value["pid"]."] Test finished");
                     self::$config["workers"][$key]["pid"] = null;
+
+                    if (!self::$firstStart)
+                        self::$resultsList[] = self::$config["workers"][$key]["lastResultPath"];
                 }
                 else
                 {
@@ -455,11 +479,33 @@ class MultiMt4
             }
         }
 
+        self::$firstStart = false;
+
         return $allDone;
     }
 
+    private static function checkNewConfigsToRun(array $indicatorsToRun)
+    {
+        $list = Indicator::listConfigs(true);
+        $alreadyDone = array_flip(self::$indisAlreadyRun);
+
+        $flag = false;
+        foreach ($list as $key => $value)
+        {
+            // name, run
+            if (isset($alreadyDone[$value["name"]]))
+                continue;
+
+            $flag = true;
+
+            $indicatorsToRun[] = new Indicator($value["name"], $value["run"]);
+        }
+        
+        return $flag;
+    }
+
     // process the reports into csv and copy all files to \results\ folder
-    public static function convertResultsToCsv()
+    public static function convertResultsToCsv(int $howMany = null)
     {
         // format: 1731;70.33;20;1.56;3.52;99.13;0.98%;73.68421053;Input1=18 ;Input2=21 ;Input3=10;ATRPeriod=14 ;Slippage=3 ;RiskPercent=2 ;TakeProfitPercent=100 ;StopLossPercent=150 ;ReopenOnOppositeSignal=1 ;OptimizationCalcType=0 ;IndicatorType=1 ;IndicatorIndex1=0 ;IndicatorIndex2=1 ;Input4=0 ;Input5=0 ;Input6=0 ;Input7=0 ;Input8=0
 
@@ -467,23 +513,46 @@ class MultiMt4
         if (!file_exists($resultsFolder))
             mkdir($resultsFolder);
 
-        foreach (self::$resultsList as $key => $value)
-        {
-            $path = $value["path"];
+        if ($howMany === null)
+            $howMany = count(self::$resultsList);
 
-            if (!file_exists($path.".html"))
+        $removeValue = function($s)
+        {
+            $index = array_search($s, self::$resultsList);
+            if ($index !== false)
             {
-                pt("[Worker:".$value["workerId"]."] Couldn't find report file on '".$value["dataPath"] . $value["lastResultPath"] . ".html"."'");
-                continue;
+                unset(self::$resultsList[$index]);
             }
+        };
+
+        $resultsList = self::$resultsList;
+        foreach ($resultsList as $key => $value)
+        {
+            if (!file_exists($value.".html"))
+            {
+                pt("Couldn't find report file on '".$value . ".html"."'");
+                $removeValue($value);
+                continue;
+                /*
+                print_r2($value);
+                print_r2(self::$resultsList);
+                die();
+                */
+            }
+
+            if ($howMany++ <= 0)
+                break;
 
             try
             {
                 // convert html to csv
                 $dom = new Dom;
-                $dom->loadFromFile($path.".html");
+                $dom->loadFromFile($value.".html");
                 $table = $dom->find('table', 1)->find("tr");
-                $rows = [ ["Pass", "Profit", "Total trades", "Profit factor", "Expected payoff", "Drawdown $", "Drawdown %", "OnTester result"] ];
+                $rows = 
+                [
+                    "Pass;Profit;Total trades;Profit factor;Expected payoff;Drawdown $;Drawdown %;OnTester result"
+                ];
                 foreach ($table as $key => $v)
                 {
                     if ($key === 0)
@@ -507,19 +576,23 @@ class MultiMt4
 
                 $csv = implode("\n", $rows);
 
+                if (count($rows) === 0)
+                    pt($value. " has 0 results!");
+
                 // save to csv
-                file_put_contents($path.".csv", $csv);
+                file_put_contents($value.".csv", $csv);
 
                 // move .htm and .csv files 
-                $newPath = $resultsFolder . array_reverse(explode("\\", $path))[0];
+                $newPath = $resultsFolder . array_reverse(explode("\\", $value))[0];
 
-                copy($path.".gif", $newPath.".gif");
-                copy($path.".html", $newPath.".html");
-                copy($path.".csv", $newPath.".csv");
+                copy($value.".gif", $newPath.".gif");
+                copy($value.".html", $newPath.".html");
+                copy($value.".csv", $newPath.".csv");
 
-                pt("[Worker:".$value["workerId"]."] Converted test result: ".$newPath);
+                $pi = pathinfo($newPath);
+                pt("Converted test result: ".$pi["filename"].".".$pi["extension"]);
 
-                unset(self::$resultsList[$key]);
+                $removeValue($value);
             }
             catch (\Exception $e)
             {
@@ -636,7 +709,7 @@ class MultiMt4
         {
             $f = $value;
 
-            if (!in_array([strlen($f) - 1], ["\\", "//"]))
+            if (!in_array($f[strlen($f) - 1], ["\\", "//"]))
                 $f .= "\\";
 
             if (!file_exists($f) || !file_exists($f."terminal.exe"))
@@ -709,7 +782,7 @@ class Indicator
     }
 
     // filter indicators configs: true = run, false = dont run, null = all
-    private static function listConfigs(bool $filterRun = null)
+    public static function listConfigs(bool $filterRun = null)
     {
         $indicatorsFolder = self::$indicatorsFolder;
         if (!file_exists($indicatorsFolder))
@@ -737,8 +810,6 @@ class Indicator
 
         return $list;
     }
-
-    //****************************************
 
     public function __construct(string $configPath, bool $run)
     {
@@ -791,7 +862,7 @@ class Indicator
 
     public function getName()
     {
-        return $this->config["eaIni"]["inputs"]["IndicatorPath"];
+        return $this->configPath;
     }
 
     public function setRun(bool $newRun)
@@ -804,19 +875,6 @@ class Indicator
         if (rename($oldname, $newname))
             $this->run = $newRun;
     }
-
-    /*
-    public function addWorker(int $id)
-    {
-        $this->workerIds[] = $id;
-    }
-
-    public function removeWorker(int $id)
-    {
-        if (($key = array_search($id, $this->workerIds)) !== false)
-            unset($this->workerIds[$key]);
-    }
-    */
 }
 
 if (php_sapi_name() === "cli")

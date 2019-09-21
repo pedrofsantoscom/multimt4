@@ -307,6 +307,7 @@ else if (isset($_GET["action"]))
         else
         {
             $config = loadDefaultConfig();
+            $config["run"] = true;
         }
 
         $eaIni = convertEaSettingsToTable($config);
@@ -415,8 +416,8 @@ else if (isset($_GET["action"]))
                                 <thead>
                                     <tr>
                                         <th class="bg-light" style="width: 20px;"></th>
-                                        <th class="bg-light" style="width: 10px;">Run</th>
-                                        <th class="bg-light">Indicator name</th>
+                                        <th class="bg-light" style="width: 10px;">Run?</th>
+                                        <th class="bg-light">Config name</th>
                                         <th class="bg-light" style="width: 170px;">Actions</th>
                                     </tr>
                                 </thead>
@@ -438,14 +439,20 @@ else if (isset($_GET["action"]))
                                             <?php echo $value["name"]; ?>
                                         </td>
                                         <td class="align-middle text-center">
-                                            <a class="btn btn-warning btn-sm" href="#" onclick="window.location='?action=edit&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
-                                                Edit
+                                            <a class="btn btn-sm btn-light" title="Run" href="#" onclick="table.row(<?php echo $key; ?>).select(); buttonSaveRun(true, true)">
+                                                <span class="glyphicon glyphicon-ok text-success"></span>
                                             </a>
-                                            <a class="btn btn-info btn-sm" href="#" onclick="window.location='?action=new&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
-                                                Duplicate
+                                            <a class="btn btn-sm btn-light" title="Don't run" href="#" onclick="table.row(<?php echo $key; ?>).select(); buttonSaveRun(false, true)">
+                                                <span class="glyphicon glyphicon-remove text-danger"></span>
                                             </a>
-                                            <a class="btn btn-danger btn-sm" href="#" onclick="return deleteIndicator('<?php echo base64_encode($value["name"]); ?>')">
-                                                Delete
+                                            <a class="btn btn-sm btn-light" title="Edit" href="#" onclick="window.location='?action=edit&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
+                                                <span class="glyphicon glyphicon-pencil text-warning"></span>
+                                            </a>
+                                            <a class="btn btn-sm btn-light" title="Duplicate" href="#" onclick="window.location='?action=new&indicator='+encodeURIComponent('<?php echo base64_encode($value["name"]); ?>')">
+                                                <span class="glyphicon glyphicon-duplicate text-info"></span>
+                                            </a>
+                                            <a class="btn btn-sm btn-light" title="Delete" href="#" onclick="return deleteIndicator('<?php echo base64_encode($value["name"]); ?>')">
+                                                <span class="glyphicon glyphicon-trash text-danger"></span>
                                             </a>
                                         </td>
                                     </tr>
@@ -469,7 +476,7 @@ else if (isset($_GET["action"]))
                                 </span>
                                 &nbsp;
                                 <div class="form-check form-check-inline h6">
-                                    <input class="form-check-input" type="checkbox" <?php echo $action === "edit" ? ($config["run"] ? "checked" : "") : ""; ?> id="run-<?php echo $action; ?>" name="run" value="1">
+                                    <input class="form-check-input" type="checkbox" <?php echo $action !== "list" ? ($config["run"] ? "checked" : "") : ""; ?> id="run-<?php echo $action; ?>" name="run" value="1">
                                     <label class="form-check-label" for="run-<?php echo $action; ?>">Run</label>
                                 </div>
                                 <span class="float-right">
@@ -574,8 +581,11 @@ else if (isset($_GET["action"]))
     <script src="assets/js/dataTables.select.min.js"></script>
     <script src="assets/js/dataTables.buttons.min.js"></script>
     <script>
-        function buttonSaveRun(run)
+        function buttonSaveRun(run, skip)
         {
+            if (skip === undefined)
+                skip = false;
+
             var data = $("#table-list").DataTable().rows({selected: true}).data();
             if (data.length === 0)
             {
@@ -583,7 +593,7 @@ else if (isset($_GET["action"]))
                 return;
             }
 
-            if (confirm("Set "+data.length+" rows to "+(run ? "" : "not ")+"run?"))
+            var func = function()
             {
                 var indicators = [];
                 data.each(function(el, i)
@@ -596,7 +606,18 @@ else if (isset($_GET["action"]))
                 //window.location = "?action=save-run&indicator="+encodeURIComponent(indi);
                 $("#table-list").parents("form").submit();
                 return true;
+            };
+
+            if (skip)
+            {
+                func();
             }
+
+            if (!skip && confirm("Set "+data.length+" rows to "+(run ? "" : "not ")+"run?"))
+            {
+                func();
+            }
+
             return false;
         }
 
