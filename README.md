@@ -8,7 +8,10 @@ Manages multiple MetaTrader 4 copies to run MT4 backtester tests at the same tim
 - PHP 7.0+
   - [Download Thread Safe Zip](https://windows.php.net/download)
   - [Add php to PATH](https://john-dugan.com/add-php-windows-path-variable/)
-  - Inside php installation folder, rename `php.ini-development` to `php.ini`, inside the file find `;extension=mbstring`, delete the `;` from the beginning of the line and save
+  - Inside php installation folder, rename `php.ini-development` to `php.ini`, inside the file find these and then save:
+    - `extension=mbstring`: delete the `;` from the beginning of the line
+    - `extension=fileinfo`: delete the `;` from the beginning of the line
+    - `extension=com_dotnet`: delete the `;` from the beginning of the line OR add a new line with `extension=com_dotnet`
 
 ## Running
 
