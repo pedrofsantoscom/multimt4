@@ -670,7 +670,7 @@ class MultiMt4
     {
         if (!file_exists(self::$configPath) || $reset)
         {
-            self::$config = self::$configTemplate;
+            file_put_contents(self::$configPath, json_encode(self::$configTemplate));
 
             echo("\nConfig file generated (config.json). Please change the following items and then re-run this program:\n- 'mt4Paths': add all mt4 folders paths;\n- 'pairsToTest': set true to test the pair;\n- 'terminalIni': set Login, Password, Server, TestFromDate, TestToDate\n");
             die();
