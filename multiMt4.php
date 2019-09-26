@@ -209,7 +209,7 @@ class MultiMt4
             while (!self::pidExists($pid))
             {
                 $exists = self::pidExists($pid);
-                pt("pid $pid exists? ".($exists ? "yes" : "no"));
+                //pt("pid $pid exists? ".($exists ? "yes" : "no"));
                 sleep(1);
             }
         }
@@ -533,11 +533,6 @@ class MultiMt4
                 pt("Couldn't find report file on '".$value . ".html"."'");
                 $removeValue($value);
                 continue;
-                /*
-                print_r2($value);
-                print_r2(self::$resultsList);
-                die();
-                */
             }
 
             if ($howMany++ <= 0)
@@ -546,32 +541,40 @@ class MultiMt4
             try
             {
                 // convert html to csv
-                $dom = new Dom;
-                $dom->loadFromFile($value.".html");
-                $table = $dom->find('table', 1)->find("tr");
+                $data = file_get_contents($value.".html");
+                if (!preg_match_all("/(<tr.*?>(.*?)<\/tr>)+/", $data, $matches))
+                    continue;
+
                 $rows = 
                 [
                     "Pass;Profit;Total trades;Profit factor;Expected payoff;Drawdown $;Drawdown %;OnTester result"
                 ];
-                foreach ($table as $key => $v)
+                foreach ($matches[1] as $key => $v)
                 {
-                    if ($key === 0)
+                    if (strpos($v, "<td title=\"") === false)
                         continue;
 
-                    $tds = $v->find("td");
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $v, $tds))
+                        continue;
+
+                    $tds = $tds[1];
 
                     $row = "";
-                    $row .= $tds[0]->text .";";
-                    $row .= $tds[1]->text .";";
-                    $row .= $tds[2]->text .";";
-                    $row .= $tds[3]->text .";";
-                    $row .= $tds[4]->text .";";
-                    $row .= $tds[5]->text .";";
-                    $row .= $tds[6]->text ."%;";
-                    $row .= $tds[7]->text .";";
-                    $row .= rtrim( str_replace( "; ", " ;", $tds[0]->getAttribute("title") ), "; ");
-                    
+                    $row .= $tds[0] .";";
+                    $row .= $tds[1] .";";
+                    $row .= $tds[2] .";";
+                    $row .= $tds[3] .";";
+                    $row .= $tds[4] .";";
+                    $row .= $tds[5] .";";
+                    $row .= $tds[6] ."%;";
+                    $row .= $tds[7] .";";
+
+                    preg_match_all("/title=\"(.*?)\"/", $v, $m);
+                    $row .= rtrim( str_replace( "; ", " ;", $m[1][0] ), "; ");
+
                     $rows[] = $row;
+                    if ($key > 1000)
+                        break;
                 }
 
                 $csv = implode("\n", $rows);
@@ -610,7 +613,7 @@ class MultiMt4
             2 => array("pipe", "r") // stderr is a file to write to
         );
 
-        $process = proc_open('start "" /B /MIN '.$command, $descriptorspec, $pipes, null, null);
+        $process = proc_open('start "" /B /MIN /LOW '.$command, $descriptorspec, $pipes, null, null);
 
         if (is_resource($process)) 
         {

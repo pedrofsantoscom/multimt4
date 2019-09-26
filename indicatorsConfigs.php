@@ -359,6 +359,19 @@ else if (isset($_GET["action"]))
             width: 1px;
             background-color: #ccc;
         }
+
+        #table-list_paginate
+        {
+            float: right;
+            padding-top: 10px;
+        }
+
+        #table-list_paginate a
+        {
+            padding: 4px;
+            cursor: hand;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -622,7 +635,9 @@ else if (isset($_GET["action"]))
         }
 
         var table = $("#table-list").DataTable({
-            "paging": false,
+            "paging": true,
+            "order": [[1, "desc"], [2, "desc"]],
+            "pageLength": 10,
             "select": 
             {
                 items: "row",
@@ -640,7 +655,7 @@ else if (isset($_GET["action"]))
                     action: buttonSaveRun.bind(null, false),
                 },
             ],
-            "dom": "Blfrtpi",
+            "dom": "Bfrtpil",
         });
 
         $(".bigger-checkbox").on("click", function(e)
