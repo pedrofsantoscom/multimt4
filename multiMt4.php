@@ -78,7 +78,7 @@ class MultiMt4
     private static $user = "";
     private static $terminalConfig = "terminal.ini";
 
-    private static $resultsList = [];
+    public static $resultsList = [];
     private static $resultsPathTemplate = "results\\[{INDICATOR}]_{PAIR}_{FROMDATE}_{TODATE}-{STARTDATE}";
 
     private static $indisAlreadyRun = [];
@@ -115,10 +115,13 @@ class MultiMt4
 
         $indi = null;
 
+        /*
         foreach (self::$config["workers"] as $key => $value)
         {
             self::checkTerminalAlreadyOpened($key);
+            //self::$resultsList[] = $value["lastResultPath"];
         }
+        */
 
         // loop
         while (true)
@@ -275,7 +278,9 @@ class MultiMt4
 
         // process format into php arrays
         $settings = [];
-        foreach ($matches[1] as $key => $value)
+        $pattern = "/[^=](\=)(\w|$)/";
+        $i = 1;
+        foreach ($matches[1] as $value)
         {
             // common, inputs, limits
             $startTagPos = strpos($eaIniData, "<$value>");
@@ -301,18 +306,27 @@ class MultiMt4
             $tagData = substr($eaIniData, $startTagPos, $endTagPos);
             $tagData = explode("\n", $tagData);
 
-            foreach ($tagData as $data)
+            foreach ($tagData as $key => $data)
             {
-                if (strpos($data, "=") === false)
+                $data = trim($data);
+                echo "'".$data ."'" . "<br>";
+
+                if ($data === "")
                     continue;
 
+                if (!preg_match($pattern, $data))
+                {
+                    $settings[$value]["divider_".$i++] = $data;
+                    continue;
+                }
+
                 $split = explode("=", $data);
+
                 $settings[$value][$split[0]] = trim($split[1]);
 
                 if (isset($newEaConfig[$value]) && isset($newEaConfig[$value][$split[0]]))
                     $settings[$value][$split[0]] = trim($newEaConfig[$value][$split[0]]);
             }
-
         }
         
         // convert to text
@@ -542,40 +556,88 @@ class MultiMt4
             {
                 // convert html to csv
                 $data = file_get_contents($value.".html");
-                if (!preg_match_all("/(<tr.*?>(.*?)<\/tr>)+/", $data, $matches))
-                    continue;
-
                 $rows = 
                 [
                     "Pass;Profit;Total trades;Profit factor;Expected payoff;Drawdown $;Drawdown %;OnTester result"
                 ];
-                foreach ($matches[1] as $key => $v)
+
+                // optimizations or single test result file
+                if (strpos($data, "title=") !== false)
                 {
-                    if (strpos($v, "<td title=\"") === false)
+                    if (!preg_match_all("/(<tr.*?>(.*?)<\/tr>)+/", $data, $matches))
                         continue;
 
-                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $v, $tds))
+                    foreach ($matches[1] as $key => $v)
+                    {
+                        if (strpos($v, "<td title=\"") === false)
+                            continue;
+
+                        if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $v, $tds))
+                            continue;
+
+                        $tds = $tds[1];
+
+                        $row = "";
+                        $row .= $tds[0] .";";
+                        $row .= $tds[1] .";";
+                        $row .= $tds[2] .";";
+                        $row .= $tds[3] .";";
+                        $row .= $tds[4] .";";
+                        $row .= $tds[5] .";";
+                        $row .= $tds[6] ."%;";
+                        $row .= $tds[7] .";";
+
+                        preg_match_all("/title=\"(.*?)\"/", $v, $m);
+                        $row .= rtrim( str_replace( "; ", " ;", $m[1][0] ), "; ");
+
+                        $rows[] = $row;
+                        if ($key > 1000)
+                            break;
+                    }
+                }
+                else // single test
+                {
+                    if (!preg_match_all("/(<tr.*?>(.*?)<\/tr>)+/s", $data, $matches))
                         continue;
 
-                    $tds = $tds[1];
+                    $table = $matches[0];
+                    //print_r2($table);die();
 
-                    $row = "";
-                    $row .= $tds[0] .";";
-                    $row .= $tds[1] .";";
-                    $row .= $tds[2] .";";
-                    $row .= $tds[3] .";";
-                    $row .= $tds[4] .";";
-                    $row .= $tds[5] .";";
-                    $row .= $tds[6] ."%;";
-                    $row .= $tds[7] .";";
+                    // "Pass;Profit;Total trades;Profit factor;Expected payoff;Drawdown $;Drawdown %;OnTester result"
 
-                    preg_match_all("/title=\"(.*?)\"/", $v, $m);
-                    $row .= rtrim( str_replace( "; ", " ;", $m[1][0] ), "; ");
+                    $row = "1;";
+
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $table[8], $netProfit))
+                        continue;
+                    $row .= $netProfit[1][1] .";";
+
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $table[12], $totalTrades))
+                        continue;
+                    $row .= $totalTrades[1][1] . ";";
+
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $table[9], $profitFactor))
+                        continue;
+                    $row .= $profitFactor[1][1] . ";";
+                    $row .= $profitFactor[1][3] . ";";
+
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/", $table[10], $drawdown))
+                        continue;
+
+                    $row .= explode(" ", $drawdown[1][3])[0] . ";";
+                    $row .= explode(" ", $drawdown[1][5])[0] . ";";
+                    $row .= "N/A;";
+                    //var_dump($drawdown[1]);die();
+
+                    if (!preg_match_all("/<td.*?>(.*?)<\/td>/s", $table[3], $params))
+                        continue;
+                    $row .= str_replace("\n", "", rtrim( str_replace( "; ", " ;", $params[1][1] ), "; "));
+                    //echo $row; die();
 
                     $rows[] = $row;
-                    if ($key > 1000)
-                        break;
+
+                    //die();
                 }
+
 
                 $csv = implode("\n", $rows);
 
@@ -673,7 +735,7 @@ class MultiMt4
     {
         if (!file_exists(self::$configPath) || $reset)
         {
-            file_put_contents(self::$configPath, json_encode(self::$configTemplate));
+            file_put_contents(self::$configPath, json_encode(self::$configTemplate), JSON_PRETTY_PRINT);
 
             echo("\nConfig file generated (config.json). Please change the following items and then re-run this program:\n- 'mt4Paths': add all mt4 folders paths;\n- 'pairsToTest': set true to test the pair;\n- 'terminalIni': set Login, Password, Server, TestFromDate, TestToDate\n");
             die();
@@ -698,7 +760,7 @@ class MultiMt4
             if (!file_exists($f) || !file_exists($f."terminal.exe"))
             {
                 unset(self::$config["workers"][$key]);
-                pt("Mt4 not found at '$value', item removed from config");
+                pt("Existing paths: Mt4 not found at '$value', item removed from config. $f");
                 continue;
             }
 
@@ -718,7 +780,7 @@ class MultiMt4
             if (!file_exists($f) || !file_exists($f."terminal.exe"))
             {
                 unset(self::$config["mt4Paths"][$key]);
-                pt("Mt4 not found at '$value', item removed from config");
+                pt("New paths: Mt4 not found at '$value', item removed from config. $f");
                 continue;
             }
 
@@ -879,6 +941,10 @@ class Indicator
             $this->run = $newRun;
     }
 }
+
+MultiMt4::$resultsList[] = "C:/Users/led/Desktop/StrategyTester";
+MultiMt4::convertResultsToCsv();
+die();
 
 if (php_sapi_name() === "cli")
     MultiMt4::init();

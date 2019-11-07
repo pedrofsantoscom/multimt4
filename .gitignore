@@ -5,3 +5,4 @@ indicators-configs/*.json
 results/*
 config.json
 mt4-folders.txt
+run/
