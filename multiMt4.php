@@ -942,9 +942,5 @@ class Indicator
     }
 }
 
-MultiMt4::$resultsList[] = "C:/Users/led/Desktop/StrategyTester";
-MultiMt4::convertResultsToCsv();
-die();
-
 if (php_sapi_name() === "cli")
     MultiMt4::init();
