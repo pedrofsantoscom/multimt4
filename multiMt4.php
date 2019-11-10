@@ -309,7 +309,7 @@ class MultiMt4
             foreach ($tagData as $key => $data)
             {
                 $data = trim($data);
-                echo "'".$data ."'" . "<br>";
+                //echo "'".$data ."'" . "<br>";
 
                 if ($data === "")
                     continue;
