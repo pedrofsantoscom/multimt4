@@ -207,7 +207,8 @@ class MultiMt4
 
             self::saveConfig();
             //$indi->addWorker($workerId);
-            pt("[Worker:$workerId][pid:$pid] Worker started: Indicator[".$indicatorName."], Pair[".$pair."]");
+            $pairCounter = $indi->getCurrentPairCounter();
+            pt("[Worker:$workerId][pid:$pid] Worker started: Pair[".$pair.", ".$pairCounter["count"]."/".$pairCounter["total"]."], Config[".$indicatorName."]");
 
             while (!self::pidExists($pid))
             {
@@ -832,6 +833,8 @@ class Indicator
     //private $workerId = null;
     private $currentPair = null;
     private $run = false;
+    private $totalPairs = 0;
+    private $counterPairs = 0;
 
     public static function factory(bool $run = null)
     {
@@ -911,13 +914,20 @@ class Indicator
         {
             $pairsToTest = array_filter($pairsToTest);
             $pairsToTest = array_keys($pairsToTest);
+            $this->totalPairs = count($pairsToTest);
         }
 
         $result = array_pop($pairsToTest);
 
         $this->currentPair = $result;
+        $this->counterPairs++;
 
         return $result;
+    }
+
+    public function getCurrentPairCounter()
+    {
+        return ["total" => $this->totalPairs, "counter" => $this->counterPairs];
     }
 
     public function getCurrentPair()
